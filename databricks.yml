@@ -1,0 +1,45 @@
+# Databricks Asset Bundle: the job lives in git, not in the workspace UI.
+#
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run      tpch_medallion -t dev
+#
+# Every target passes catalog and schema_prefix as job parameters, which the
+# tasks forward to the CLI, which hands them to Config. No name is hardcoded
+# anywhere along that path.
+
+bundle:
+  name: tpch-procurement
+
+include:
+  - resources/*.yml
+
+artifacts:
+  tpch_lakehouse:
+    type: whl
+    path: .
+    build: uv build --wheel
+
+variables:
+  catalog:
+    description: Catalog the three layer schemas live in
+    default: workspace
+  schema_prefix:
+    description: Prefix shared by the bronze, silver and gold schemas
+    default: tpch_procurement
+  source_catalog:
+    description: Catalog holding the raw TPC-H tables
+    default: samples
+  source_schema:
+    description: Schema holding the raw TPC-H tables
+    default: tpch
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  preprod:
+    mode: production
+    variables:
+      schema_prefix: tpch_procurement_preprod

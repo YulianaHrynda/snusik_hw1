@@ -1,0 +1,75 @@
+resources:
+  jobs:
+    tpch_medallion:
+      name: "[${bundle.target}] TPC-H medallion - procurement"
+
+      # Declared once, forwarded to every task. Change them at run time from
+      # the UI or with `databricks bundle run --params ...` to retarget the run.
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema_prefix
+          default: ${var.schema_prefix}
+        - name: source_catalog
+          default: ${var.source_catalog}
+        - name: source_schema
+          default: ${var.source_schema}
+
+      job_clusters:
+        - job_cluster_key: pipeline
+          new_cluster:
+            # Adjust to whatever your workspace actually offers before deploying.
+            spark_version: 15.4.x-scala2.12
+            node_type_id: Standard_DS3_v2
+            num_workers: 1
+            data_security_mode: SINGLE_USER
+
+      tasks:
+        - task_key: bronze
+          job_cluster_key: pipeline
+          python_wheel_task:
+            package_name: tpch_lakehouse
+            entry_point: bronze
+            parameters: &layer_params
+              - "--env={{job.parameters.env}}"
+              - "--catalog={{job.parameters.catalog}}"
+              - "--schema-prefix={{job.parameters.schema_prefix}}"
+              - "--source-catalog={{job.parameters.source_catalog}}"
+              - "--source-schema={{job.parameters.source_schema}}"
+          libraries:
+            - whl: ../dist/*.whl
+
+        - task_key: silver
+          depends_on:
+            - task_key: bronze
+          job_cluster_key: pipeline
+          python_wheel_task:
+            package_name: tpch_lakehouse
+            entry_point: silver
+            parameters: *layer_params
+          libraries:
+            - whl: ../dist/*.whl
+
+        - task_key: gold
+          depends_on:
+            - task_key: silver
+          job_cluster_key: pipeline
+          python_wheel_task:
+            package_name: tpch_lakehouse
+            entry_point: gold
+            parameters: *layer_params
+          libraries:
+            - whl: ../dist/*.whl
+
+        - task_key: monitoring
+          depends_on:
+            - task_key: gold
+          job_cluster_key: pipeline
+          python_wheel_task:
+            package_name: tpch_lakehouse
+            entry_point: monitoring
+            parameters: *layer_params
+          libraries:
+            - whl: ../dist/*.whl
