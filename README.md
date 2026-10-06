@@ -88,9 +88,43 @@ rejected rows stay recoverable and the totals still reconcile.
 
 ## Metric definitions
 
-Every headline number has exactly one definition here, and every query in the
-repo uses it. *(To be filled in as the layers land — in particular what "spend"
-means, since monitoring and the gold answers must agree on it.)*
+Every headline number is defined once here, and every query in the repo uses
+that definition. If a gold answer and a monitoring chart disagree, one of them
+stopped following this section.
+
+**Spend** — what we pay a supplier:
+
+```
+spend = ps_supplycost * l_quantity
+```
+
+Not `l_extendedprice`. That is what a customer pays *us*, which is a Finance
+number; Procurement is asked what the company pays out. A line item resolves to
+its supply agreement on **both** keys together, `(l_partkey, l_suppkey)` —
+joining on the part alone multiplies spend by the number of suppliers offering
+that part.
+
+**Period** — calendar month of `o_orderdate`. `partsupp` carries no date of its
+own, so every time series is anchored to when the goods were actually ordered.
+
+**Spend concentration** — within one month, the share of total spend held by the
+ten largest suppliers. Rising concentration is rising single-supplier risk.
+
+**Average supply cost by region** — spend-weighted, per unit:
+
+```
+sum(ps_supplycost * l_quantity) / sum(l_quantity)
+```
+
+Deliberately not `avg(ps_supplycost)`. That averages a price list rather than
+real purchases, and averaging those averages across regions produces a number
+with no meaning — the non-additive-measure trap.
+
+**Single-supplier alert** — fires when one supplier holds more than **5%** of a
+month's spend. The threshold is a choice, not a derivation: at 10k suppliers an
+even split gives each 0.01%, so 5% means one supplier is carrying five hundred
+times its share and is worth a human look. Tune it in
+`monitoring.SINGLE_SUPPLIER_SHARE_THRESHOLD`.
 
 ## Status
 
@@ -100,7 +134,7 @@ means, since monitoring and the gold answers must agree on it.)*
 | bronze | person 1 | done |
 | silver | person 2 | not started |
 | gold | person 3 | not started |
-| monitoring + alert | person 1 | not started |
+| monitoring + alert | person 1 | done, waiting on silver |
 
 ## Presentation
 
