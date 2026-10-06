@@ -19,6 +19,8 @@ src/tpch_lakehouse/
   gold.py                   procurement marts                 (person 3)
   monitoring.py             metrics over time + alert         (person 1)
 notebooks/run_bronze.py     run bronze from a Databricks Git folder
+notebooks/show_silver_validation.py   silver checks, for the demo
+docs/silver_er.svg          ER diagram of the silver tables
 databricks.yml              asset bundle
 resources/                  the job: bronze -> silver -> gold -> monitoring
 tests/                      config tests, runnable without a cluster
@@ -80,9 +82,28 @@ table name, e.g. `samples.tpch.supplier`). It exists to answer *what arrived,
 from where, and when* — the question that becomes unanswerable once data is
 cleaned on the way in.
 
-**Silver** — 3NF, typed, deduplicated, rules enforced. Rows that fail a rule go
-to `quarantine_<table>` with the reason attached rather than being dropped, so
-rejected rows stay recoverable and the totals still reconcile.
+**Silver** — 3NF, typed, deduplicated, rules enforced. The eight tables stay at
+the original grain and keep their TPC-H column names. Rows that fail a rule go
+to `quarantine_<table>` with `_failed_rules` attached rather than being dropped,
+so rejected rows stay recoverable and bronze = silver + quarantine.
+
+A key is only referenceable once it has landed in silver. A nation that failed
+its region check cannot be used by a supplier. The diagram is
+[`docs/silver_er.svg`](docs/silver_er.svg).
+
+Primary and foreign keys are declared on Delta. Databricks does not enforce
+those constraints, so each rule below is an anti-join (or, for the price, a
+predicate). A predicate that comes back NULL counts as a failure.
+
+- **Line item → partsupp.** Anti-join on `(l_partkey, l_suppkey)` =
+  `(ps_partkey, ps_suppkey)` together. Either column on its own is not the key.
+- **Supplier → nation → region.** `s_nationkey` must exist in `nation`, and
+  `n_regionkey` must exist in `region`.
+- **Supply cost.** `0 < ps_supplycost <= p_retailprice` of that part. A missing
+  part fails the rule, because the comparison cannot be shown.
+
+The other foreign keys of the model — customer to nation, partsupp to part and
+to supplier, orders to customer, lineitem to orders — are enforced the same way.
 
 **Gold** — marts shaped by the Procurement questions. Reads silver only.
 
@@ -132,9 +153,9 @@ times its share and is worth a human look. Tune it in
 |---|---|---|
 | repo, config, job | person 1 | done |
 | bronze | person 1 | done |
-| silver | person 2 | not started |
+| silver | person 2 | done |
 | gold | person 3 | not started |
-| monitoring + alert | person 1 | done, waiting on silver |
+| monitoring + alert | person 1 | done |
 
 ## Presentation
 
