@@ -1,0 +1,39 @@
+# Single source of truth for every name the pipeline touches.
+# Nothing below is hardcoded anywhere in src/ — override it per environment,
+# per job run (Databricks job parameters), or per shell (TPCH_* env vars).
+
+defaults:
+  # Where we write.
+  catalog: workspace
+  schema_prefix: tpch_procurement
+
+  # One schema per layer: <schema_prefix>_<layer>
+  layers:
+    bronze: bronze
+    silver: silver
+    gold: gold
+
+  # Where we read. On another workspace this is the only thing that changes.
+  source_catalog: samples
+  source_schema: tpch
+
+  # The eight TPC-H tables, in dependency order (parents before children).
+  tables:
+    - region
+    - nation
+    - customer
+    - supplier
+    - part
+    - partsupp
+    - orders
+    - lineitem
+
+  write_mode: overwrite
+
+environments:
+  dev: {}
+
+  # Pre-production is the only data we are promised access to (assignment, 3.2).
+  # Keeping it as its own environment proves the scripts are portable.
+  preprod:
+    schema_prefix: tpch_procurement_preprod
