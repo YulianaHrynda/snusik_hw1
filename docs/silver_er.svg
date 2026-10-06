@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" width="1280" height="760">
+  <style>
+    .bg { fill: #f4f0e6; }
+    .card { fill: #fffdf8; stroke: #1c1917; stroke-width: 1.4; }
+    .hotcard { fill: #fffdf8; stroke: #9a3412; stroke-width: 1.8; }
+    .head { fill: #1f3a34; }
+    .title { font-family: Georgia, "Iowan Old Style", Palatino, serif; font-size: 28px; fill: #1c1917; }
+    .sub { font-family: Georgia, "Iowan Old Style", Palatino, serif; font-size: 15px; fill: #57534e; }
+    .name { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 16px; font-weight: 650; fill: #fffdf8; }
+    .col { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; fill: #1c1917; }
+    .tag { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; font-weight: 700; fill: #9a3412; }
+    .rel { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; fill: #44403c; }
+    .note { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; fill: #44403c; }
+    .wire { fill: none; stroke: #78716c; stroke-width: 1.4; }
+    .hot { fill: none; stroke: #9a3412; stroke-width: 2.2; }
+  </style>
+  <rect class="bg" width="1280" height="760"/>
+  <text class="title" x="40" y="46">Silver — third normal form</text>
+  <text class="sub" x="40" y="72">TPC-H procurement. Keys are declared; the anti-join is what enforces them.</text>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.2 L 9 5 L 0 8.8 z" fill="#78716c"/>
+    </marker>
+    <marker id="arrow-hot" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1.2 L 9 5 L 0 8.8 z" fill="#9a3412"/>
+    </marker>
+  </defs>
+
+  <!-- row 1: region, nation, customer, orders. x = 40, 352, 664, 976. w = 264 -->
+  <g transform="translate(40,100)">
+    <rect class="card" width="264" height="126"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">region</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">r_regionkey</text>
+    <text class="col" x="46" y="86">r_name</text>
+    <text class="col" x="46" y="112">r_comment</text>
+  </g>
+  <g transform="translate(352,100)">
+    <rect class="card" width="264" height="126"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">nation</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">n_nationkey</text>
+    <text class="col" x="46" y="86">n_name</text>
+    <text class="tag" x="14" y="112">FK</text><text class="col" x="46" y="112">n_regionkey</text>
+  </g>
+  <g transform="translate(664,100)">
+    <rect class="card" width="264" height="126"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">customer</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">c_custkey</text>
+    <text class="col" x="46" y="86">c_name</text>
+    <text class="tag" x="14" y="112">FK</text><text class="col" x="46" y="112">c_nationkey</text>
+  </g>
+  <g transform="translate(976,100)">
+    <rect class="card" width="264" height="126"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">orders</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">o_orderkey</text>
+    <text class="col" x="46" y="86">o_orderdate</text>
+    <text class="tag" x="14" y="112">FK</text><text class="col" x="46" y="112">o_custkey</text>
+  </g>
+
+  <!-- row 2 -->
+  <g transform="translate(40,400)">
+    <rect class="card" width="264" height="152"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">supplier</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">s_suppkey</text>
+    <text class="col" x="46" y="86">s_name</text>
+    <text class="tag" x="14" y="112">FK</text><text class="col" x="46" y="112">s_nationkey</text>
+    <text class="col" x="46" y="138">s_comment</text>
+  </g>
+  <g transform="translate(352,400)">
+    <rect class="hotcard" width="264" height="178"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">partsupp</text>
+    <text class="tag" x="14" y="60">PK FK</text><text class="col" x="64" y="60">ps_partkey</text>
+    <text class="tag" x="14" y="86">PK FK</text><text class="col" x="64" y="86">ps_suppkey</text>
+    <text class="col" x="64" y="112">ps_availqty</text>
+    <text class="col" x="64" y="138">ps_supplycost</text>
+    <text class="tag" x="14" y="164">RULE</text><text class="col" x="64" y="164">0 &lt; cost &lt;= retail</text>
+  </g>
+  <g transform="translate(664,400)">
+    <rect class="card" width="264" height="126"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">part</text>
+    <text class="tag" x="14" y="60">PK</text><text class="col" x="46" y="60">p_partkey</text>
+    <text class="col" x="46" y="86">p_brand</text>
+    <text class="col" x="46" y="112">p_retailprice</text>
+  </g>
+  <g transform="translate(976,400)">
+    <rect class="hotcard" width="264" height="178"/>
+    <rect class="head" width="264" height="34"/>
+    <text class="name" x="14" y="23">lineitem</text>
+    <text class="tag" x="14" y="60">PK FK</text><text class="col" x="64" y="60">l_orderkey</text>
+    <text class="tag" x="14" y="86">PK</text><text class="col" x="64" y="86">l_linenumber</text>
+    <text class="tag" x="14" y="112">FK</text><text class="col" x="64" y="112">l_partkey</text>
+    <text class="tag" x="14" y="138">FK</text><text class="col" x="64" y="138">l_suppkey</text>
+    <text class="col" x="64" y="164">l_quantity</text>
+  </g>
+
+  <!-- top-row foreign keys, pointing at the parent on the left -->
+  <path class="wire" d="M352 162 H304" marker-end="url(#arrow)"/>
+  <path class="wire" d="M664 162 H616" marker-end="url(#arrow)"/>
+  <path class="wire" d="M976 162 H928" marker-end="url(#arrow)"/>
+
+  <!-- supplier.s_nationkey -> nation, through the gap between the rows -->
+  <path class="wire" d="M172 400 V330 H484 V226" marker-end="url(#arrow)"/>
+  <text class="rel" x="188" y="322">s_nationkey</text>
+
+  <!-- partsupp -> supplier, partsupp -> part -->
+  <path class="wire" d="M352 490 H304" marker-end="url(#arrow)"/>
+  <path class="wire" d="M616 490 H664" marker-end="url(#arrow)"/>
+
+  <!-- lineitem.l_orderkey -> orders -->
+  <path class="wire" d="M1108 400 V226" marker-end="url(#arrow)"/>
+  <text class="rel" x="1116" y="320">l_orderkey</text>
+
+  <!-- two-column key, under the row so it does not cross part -->
+  <path class="hot" d="M1108 578 V650 H484 V578" marker-end="url(#arrow-hot)"/>
+  <text class="rel" x="560" y="642" fill="#9a3412">anti-join on (l_partkey, l_suppkey) together</text>
+
+  <text class="note" x="40" y="708">A rejected row goes to quarantine_&lt;table&gt; with the rule name in _failed_rules. Bronze = silver + quarantine.</text>
+  <text class="note" x="40" y="732">The rust edge is the two-column foreign key. Joining on either column alone would accept a supplier who does not sell that part.</text>
+</svg>
