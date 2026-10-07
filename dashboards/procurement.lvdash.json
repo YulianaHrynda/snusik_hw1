@@ -1,0 +1,922 @@
+{
+  "datasets": [
+    {
+      "name": "headline",
+      "displayName": "Headline numbers",
+      "queryLines": [
+        "SELECT\n",
+        "  (SELECT round(100 * sum(inventory_value) / max(total_inventory_value), 2)\n",
+        "     FROM supplier_inventory WHERE rank <= 10)                          AS top10_inventory_pct,\n",
+        "  (SELECT round(100 * avg(top10_share), 2)\n",
+        "     FROM monitor_spend_concentration)                                  AS avg_top10_spend_pct,\n",
+        "  (SELECT count_if(is_single_sourced) FROM part_sourcing)               AS single_sourced_parts,\n",
+        "  (SELECT round(100 * sum(CASE WHEN has_complaint THEN spend ELSE 0 END) / sum(spend), 3)\n",
+        "     FROM supplier_complaints)                                          AS complaint_spend_pct"
+      ]
+    },
+    {
+      "name": "q1_top10",
+      "displayName": "Q1 top-ten inventory",
+      "queryLines": [
+        "SELECT rank, supplier_name, nation, region,\n",
+        "       round(inventory_value / 1e6, 2) AS inventory_value_m,\n",
+        "       round(100 * inventory_share, 3) AS inventory_pct\n",
+        "FROM supplier_inventory WHERE rank <= 10"
+      ]
+    },
+    {
+      "name": "q2_gaps",
+      "displayName": "Q2 Brand#32 largest price gaps",
+      "queryLines": [
+        "SELECT concat('Part ', part_key) AS part, cheapest_cost, most_expensive_cost, cost_gap,\n",
+        "       round(100 * cost_gap_share, 1) AS cost_gap_pct\n",
+        "FROM brand32_sourcing ORDER BY cost_gap DESC, part_key LIMIT 15"
+      ]
+    },
+    {
+      "name": "q2_status",
+      "displayName": "Q2 Brand#32 sourcing status",
+      "queryLines": [
+        "SELECT sourcing_status, count(*) AS parts FROM brand32_sourcing GROUP BY sourcing_status"
+      ]
+    },
+    {
+      "name": "q3_distribution",
+      "displayName": "Q3 suppliers used per part",
+      "queryLines": [
+        "SELECT CAST(ordered_supplier_count AS STRING) AS suppliers_used, count(*) AS parts\n",
+        "FROM part_sourcing GROUP BY ordered_supplier_count"
+      ]
+    },
+    {
+      "name": "q3_by_region",
+      "displayName": "Q3 single-sourced parts by region",
+      "queryLines": [
+        "SELECT sole_supplier_region AS region, count(*) AS single_sourced_parts,\n",
+        "       round(sum(spend) / 1e6, 3) AS spend_m\n",
+        "FROM part_sourcing WHERE is_single_sourced GROUP BY sole_supplier_region"
+      ]
+    },
+    {
+      "name": "q4_suppliers",
+      "displayName": "Q4 suppliers with complaints",
+      "queryLines": [
+        "SELECT supplier_name, nation, region, round(spend / 1e6, 3) AS spend_m,\n",
+        "       round(100 * spend_share, 4) AS spend_pct, supplier_comment\n",
+        "FROM supplier_complaints WHERE has_complaint ORDER BY spend DESC"
+      ]
+    },
+    {
+      "name": "q4_trend",
+      "displayName": "Q4 complaint spend share by month",
+      "queryLines": [
+        "SELECT m.period,\n",
+        "       round(100 * sum(CASE WHEN c.has_complaint THEN m.spend ELSE 0 END) / sum(m.spend), 4)\n",
+        "           AS complaint_spend_pct\n",
+        "FROM supplier_spend_monthly m JOIN supplier_complaints c USING (supplier_key)\n",
+        "GROUP BY m.period"
+      ]
+    },
+    {
+      "name": "mon_concentration",
+      "displayName": "Monitoring spend concentration",
+      "queryLines": [
+        "SELECT period, round(100 * top10_share, 3) AS top10_spend_pct FROM monitor_spend_concentration"
+      ]
+    },
+    {
+      "name": "mon_region_cost",
+      "displayName": "Monitoring supply cost by region",
+      "queryLines": [
+        "SELECT period, region, avg_supply_cost_per_unit FROM monitor_supply_cost_by_region"
+      ]
+    },
+    {
+      "name": "mon_largest_supplier",
+      "displayName": "Monitoring largest single-supplier share",
+      "queryLines": [
+        "SELECT period, round(100 * max(spend) / sum(spend), 3) AS largest_supplier_pct\n",
+        "FROM supplier_spend_monthly GROUP BY period"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Overview",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "overview_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# TPC-H Procurement\n",
+                "What we pay suppliers, how exposed we are to any single one, and which suppliers are worth keeping. Spend = `ps_supplycost * l_quantity`; definitions are in the repo README."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_top10_inventory",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "headline",
+                  "fields": [
+                    {
+                      "name": "top10_inventory_pct",
+                      "expression": "`top10_inventory_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "top10_inventory_pct",
+                  "displayName": "Top-10 share of inventory value, %"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top-10 share of inventory value, %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_top10_spend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "headline",
+                  "fields": [
+                    {
+                      "name": "avg_top10_spend_pct",
+                      "expression": "`avg_top10_spend_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_top10_spend_pct",
+                  "displayName": "Top-10 share of monthly spend (avg), %"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top-10 share of monthly spend (avg), %"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_single_sourced",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "headline",
+                  "fields": [
+                    {
+                      "name": "single_sourced_parts",
+                      "expression": "`single_sourced_parts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "single_sourced_parts",
+                  "displayName": "Single-sourced parts with alternatives"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Single-sourced parts with alternatives"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_complaints",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "headline",
+                  "fields": [
+                    {
+                      "name": "complaint_spend_pct",
+                      "expression": "`complaint_spend_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "complaint_spend_pct",
+                  "displayName": "Spend through complaint suppliers, %"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Spend through complaint suppliers, %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 2,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "q1_q2",
+      "displayName": "Q1-Q2 Inventory and price",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "q1_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q1_top10",
+                  "fields": [
+                    {
+                      "name": "supplier_name",
+                      "expression": "`supplier_name`"
+                    },
+                    {
+                      "name": "inventory_value_m",
+                      "expression": "`inventory_value_m`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "inventory_value_m",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "inventory_value_m"
+                },
+                "y": {
+                  "fieldName": "supplier_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "supplier_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q1. Ten suppliers with the largest inventory value (millions)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "q2_gap_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q2_gaps",
+                  "fields": [
+                    {
+                      "name": "part",
+                      "expression": "`part`"
+                    },
+                    {
+                      "name": "cost_gap",
+                      "expression": "`cost_gap`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cost_gap",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost_gap"
+                },
+                "y": {
+                  "fieldName": "part",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "part"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q2. Brand#32: 15 largest supply-cost gaps (max - min per unit)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "q2_status_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q2_status",
+                  "fields": [
+                    {
+                      "name": "sourcing_status",
+                      "expression": "`sourcing_status`"
+                    },
+                    {
+                      "name": "parts",
+                      "expression": "`parts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sourcing_status",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "sourcing_status"
+                },
+                "y": {
+                  "fieldName": "parts",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "parts"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q2. Brand#32: do we order from the cheapest supplier?"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "q3_q4",
+      "displayName": "Q3-Q4 Sourcing risk",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "q3_dist_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_distribution",
+                  "fields": [
+                    {
+                      "name": "suppliers_used",
+                      "expression": "`suppliers_used`"
+                    },
+                    {
+                      "name": "parts",
+                      "expression": "`parts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "suppliers_used",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "suppliers_used"
+                },
+                "y": {
+                  "fieldName": "parts",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "parts"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q3. Parts by number of suppliers actually ordered from"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_region_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_by_region",
+                  "fields": [
+                    {
+                      "name": "region",
+                      "expression": "`region`"
+                    },
+                    {
+                      "name": "single_sourced_parts",
+                      "expression": "`single_sourced_parts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "single_sourced_parts",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "single_sourced_parts"
+                },
+                "y": {
+                  "fieldName": "region",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "region"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q3. Single-sourced parts by the sole supplier's region"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q4_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q4_suppliers",
+                  "fields": [
+                    {
+                      "name": "supplier_name",
+                      "expression": "`supplier_name`"
+                    },
+                    {
+                      "name": "nation",
+                      "expression": "`nation`"
+                    },
+                    {
+                      "name": "region",
+                      "expression": "`region`"
+                    },
+                    {
+                      "name": "spend_m",
+                      "expression": "`spend_m`"
+                    },
+                    {
+                      "name": "spend_pct",
+                      "expression": "`spend_pct`"
+                    },
+                    {
+                      "name": "supplier_comment",
+                      "expression": "`supplier_comment`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "supplier_name",
+                    "displayName": "supplier_name",
+                    "title": "supplier_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 0
+                  },
+                  {
+                    "fieldName": "nation",
+                    "displayName": "nation",
+                    "title": "nation",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 1
+                  },
+                  {
+                    "fieldName": "region",
+                    "displayName": "region",
+                    "title": "region",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 2
+                  },
+                  {
+                    "fieldName": "spend_m",
+                    "displayName": "spend_m",
+                    "title": "spend_m",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 3
+                  },
+                  {
+                    "fieldName": "spend_pct",
+                    "displayName": "spend_pct",
+                    "title": "spend_pct",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 4
+                  },
+                  {
+                    "fieldName": "supplier_comment",
+                    "displayName": "supplier_comment",
+                    "title": "supplier_comment",
+                    "type": "string",
+                    "displayAs": "string",
+                    "order": 5
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q4. Suppliers with 'Customer ... Complaints' in their comment"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "q4_trend_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q4_trend",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "complaint_spend_pct",
+                      "expression": "`complaint_spend_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "complaint_spend_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "complaint_spend_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q4. Monthly share of spend through complaint suppliers, %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "monitoring",
+      "displayName": "Monitoring",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "mon_conc_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "mon_concentration",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "top10_spend_pct",
+                      "expression": "`top10_spend_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "top10_spend_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "top10_spend_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Share of monthly spend held by the top 10 suppliers, %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "mon_cost_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "mon_region_cost",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "avg_supply_cost_per_unit",
+                      "expression": "`avg_supply_cost_per_unit`"
+                    },
+                    {
+                      "name": "region",
+                      "expression": "`region`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "avg_supply_cost_per_unit",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg_supply_cost_per_unit"
+                },
+                "color": {
+                  "fieldName": "region",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "region"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Spend-weighted supply cost per unit, by region"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "mon_largest_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "mon_largest_supplier",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "largest_supplier_pct",
+                      "expression": "`largest_supplier_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "largest_supplier_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "largest_supplier_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Largest single-supplier share of monthly spend, % (alert above 5%)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -3,9 +3,9 @@
 Owner: Person 3.
 
 Reads silver only. Builds supplier inventory, monthly supplier spend, activity
-for every available part/supplier pair, and the Brand#32 sourcing comparison.
-The shared tables retain alternatives with no orders and supplier comments so
-Person 4 can build Questions 3 and 4 without changing the metric definitions.
+for every available part/supplier pair, and the Brand#32 sourcing comparison
+(Person 3), then per-part sourcing risk and supplier complaints on top of the
+same spend definition (Person 4).
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from tpch_lakehouse.config import Config
 
 LAYER = "gold"
 SOURCE_LAYER = "silver"
+
+COMPLAINT_PATTERN = "%Customer%Complaints%"
 
 log = logging.getLogger(__name__)
 
@@ -165,14 +167,79 @@ def brand32_sourcing(spark: Any, config: Config) -> Any:
     """)
 
 
+def part_sourcing(spark: Any, config: Config) -> Any:
+    """Q3: one row per part on offer; flags parts bought from one supplier despite alternatives.
+
+    The sole supplier's attributes are filled only when exactly one supplier was
+    ordered from, so they can be grouped on without guessing which one it was.
+    """
+    return spark.sql(f"""
+        WITH offers AS ({_part_supplier_activity(config)}),
+        per_part AS (
+            SELECT part_key, part_name, brand,
+                   count(*) AS available_supplier_count,
+                   sum(CASE WHEN line_count > 0 THEN 1 ELSE 0 END) AS ordered_supplier_count,
+                   sum(line_count) AS line_count,
+                   sum(quantity) AS quantity, sum(spend) AS spend
+            FROM offers
+            GROUP BY part_key, part_name, brand
+        )
+        SELECT p.*,
+               p.available_supplier_count - p.ordered_supplier_count AS unused_supplier_count,
+               CASE WHEN p.ordered_supplier_count = 0 THEN 'NOT_ORDERED'
+                    WHEN p.ordered_supplier_count = 1 AND p.available_supplier_count > 1
+                        THEN 'SINGLE_WITH_ALTERNATIVES'
+                    WHEN p.ordered_supplier_count = 1 THEN 'SINGLE_NO_ALTERNATIVE'
+                    ELSE 'MULTI_SUPPLIER' END AS sourcing_status,
+               p.ordered_supplier_count = 1 AND p.available_supplier_count > 1
+                   AS is_single_sourced,
+               o.supplier_key AS sole_supplier_key, o.supplier_name AS sole_supplier_name,
+               o.nation AS sole_supplier_nation, o.region AS sole_supplier_region
+        FROM per_part p
+        LEFT JOIN offers o
+          ON o.part_key = p.part_key AND o.line_count > 0 AND p.ordered_supplier_count = 1
+    """)
+
+
+def supplier_complaints(spark: Any, config: Config) -> Any:
+    """Q4: every supplier, flagged by complaint text, with its share of all spend.
+
+    A NULL comment counts as no complaint rather than vanishing from both
+    groups, so complaint and non-complaint shares always add up to one.
+    """
+    return spark.sql(f"""
+        WITH lines AS ({_order_lines(config)}),
+        suppliers AS ({_suppliers(config)}),
+        activity AS (
+            SELECT supplier_key, count(*) AS line_count, sum(quantity) AS quantity,
+                   sum(spend) AS spend
+            FROM lines GROUP BY supplier_key
+        ),
+        flagged AS (
+            SELECT s.*,
+                   coalesce(s.supplier_comment LIKE '{COMPLAINT_PATTERN}', false)
+                       AS has_complaint,
+                   coalesce(a.line_count, 0) AS line_count,
+                   coalesce(a.quantity, 0) AS quantity, coalesce(a.spend, 0) AS spend
+            FROM suppliers s LEFT JOIN activity a USING (supplier_key)
+        )
+        SELECT *, sum(spend) OVER () AS total_spend,
+               CASE WHEN sum(spend) OVER () > 0 THEN spend / sum(spend) OVER () END
+                   AS spend_share
+        FROM flagged
+    """)
+
+
 def run(spark: Any, config: Config) -> None:
-    """Recompute the four gold marts; reruns replace aggregates rather than append."""
+    """Recompute the gold marts; reruns replace aggregates rather than append."""
     config.create_schemas(spark)
     for name, build in (
         ("supplier_inventory", supplier_inventory),
         ("supplier_spend_monthly", supplier_spend_monthly),
         ("part_supplier_activity", part_supplier_activity),
         ("brand32_sourcing", brand32_sourcing),
+        ("part_sourcing", part_sourcing),
+        ("supplier_complaints", supplier_complaints),
     ):
         target = config.table(LAYER, name)
         build(spark, config).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(
