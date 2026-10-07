@@ -1,276 +1,169 @@
-# TPC-H medallion lakehouse — Procurement
+# TPC-H Lakehouse: Procurement
 
-A bronze / silver / gold lakehouse over `samples.tpch`, built to answer the
-questions the **Procurement** customer profile asks: what we pay suppliers, how
-exposed we are to any single one, and which suppliers are worth keeping.
+This is our group project for the Big Data course (Group Assignment 1).
 
-Group Assignment 1. The brief is in [`group_assignment_1.pdf`](group_assignment_1.pdf).
+We took the TPC-H sample data that comes with every Databricks workspace and built a
+small lakehouse on it with three layers: bronze, silver and gold. Then we used it to
+answer questions for the **Procurement** team. They want to know what we pay our
+suppliers, whether we depend too much on one of them, and which suppliers are worth
+keeping.
 
-## Layout
+The task description is in [`group_assignment_1.pdf`](group_assignment_1.pdf).
+
+## Team
+
+| Who | What they did |
+|---|---|
+| Person 1, Ostap Mnykh | repo setup, config, bronze layer, Databricks job, monitoring |
+| Person 2 | silver layer, data checks, ER diagram |
+| Person 3, Yulian Zaiats | gold tables, questions 1 and 2 |
+| Person 4, Yuliana Hrynda | questions 3 and 4, dashboard |
+
+## What is in the repo
 
 ```
-conf/config.yaml            every catalog, schema and table name, in one place
-src/tpch_lakehouse/
-  config.py                 resolves that file into three-level table names
-  cli.py                    flags shared by all four entry points
-  session.py                SparkSession, on a cluster or locally
-  bronze.py                 capture the source as is          (person 1)
-  silver.py                 3NF + enforced data quality       (person 2)
-  gold.py                   procurement marts                 (persons 3, 4)
-  monitoring.py             metrics over time + alert         (person 1)
-notebooks/run_bronze.py     run bronze from a Databricks Git folder
-notebooks/show_silver_validation.py   silver checks, for the demo
-notebooks/show_gold_questions.py     Q1/Q2 answers and charts (person 3)
-notebooks/show_gold_questions_q3_q4.py  Q3/Q4 answers and charts (person 4)
-dashboards/procurement.lvdash.json   Databricks dashboard, all questions + monitoring (person 4)
-docs/silver_er.svg          ER diagram of the silver tables
-databricks.yml              asset bundle
-resources/                  the job: bronze -> silver -> gold -> monitoring, and the dashboard
-tests/                      config, silver and gold tests, runnable without a cluster
-data/                       lecture walkthroughs, reference only
+conf/config.yaml        all table and schema names live here
+src/tpch_lakehouse/     the pipeline code
+  bronze.py             copies the raw data
+  silver.py             cleans and checks the data
+  gold.py               builds tables for the questions
+  monitoring.py         tracks numbers over time and raises an alert
+notebooks/              notebooks with the answers and charts
+dashboards/             the Databricks dashboard
+docs/silver_er.svg      ER diagram of the silver tables
+resources/              the Databricks job and dashboard setup
+tests/                  tests that run on your laptop, no cluster needed
+data/                   lecture examples, just for reference
 ```
 
-## Running it
+## How to run it
+
+On your computer, you need [uv](https://docs.astral.sh/uv/) and Java (for the tests):
 
 ```bash
 uv sync
 uv run pytest
-uv run ruff check .
 ```
 
-Each layer is a console script and takes the same flags:
+On Databricks, you need the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/)
+and a login:
 
 ```bash
-uv run bronze --catalog workspace --schema-prefix tpch_procurement
-```
-
-### On Databricks, by hand
-
-Clone the repo as a Git folder, open `notebooks/run_bronze.py`, attach a cluster,
-run all. Nothing to install. The notebook puts `src/` on the path and calls the
-same `run()` the job calls.
-
-### On Databricks, as a job
-
-```bash
-databricks bundle validate -t dev
-databricks bundle deploy   -t dev
+databricks auth login --host https://<your-workspace>.cloud.databricks.com
+databricks bundle deploy -t dev
 databricks bundle run tpch_medallion -t dev
 ```
 
-The deploy also publishes the **Procurement dashboard**. It runs on the SQL
-warehouse named `Serverless Starter Warehouse`. On a workspace without one, pass
-`--var warehouse_id=<id>` to `validate` and `deploy`. Its queries name gold tables
-without a catalog or schema. The bundle sets `dataset_catalog` and
-`dataset_schema` to the target's gold schema, so the same JSON serves dev and
-preprod. Run the job at least once before opening the dashboard.
+This creates a job that runs bronze → silver → gold → monitoring, plus a dashboard.
+It works on the free Databricks edition.
 
-## Nothing is hardcoded
+If you share a workspace with your team, someone may already own the default schemas.
+In that case, use your own name in the schema prefix:
 
-The assignment asks for scripts that port to another workspace, assuming access
-to pre-production data only. So no module outside `config.py` names a catalog,
-schema or table — they ask a `Config` object, which resolves names in this
-order, each winning over the one above:
+```bash
+databricks bundle deploy -t dev --var schema_prefix=tpch_procurement_<yourname>
+databricks bundle run tpch_medallion -t dev --var schema_prefix=tpch_procurement_<yourname>
+```
 
-1. `defaults` in `conf/config.yaml`
-2. the `environments.<env>` block (`dev`, `preprod`)
-3. `TPCH_*` environment variables — `TPCH_CATALOG`, `TPCH_SCHEMA_PREFIX`, …
-4. command-line flags — which is how Databricks job parameters arrive, so
-   there is one mechanism rather than two
+After the job finishes, open `notebooks/show_gold_questions.py` (questions 1–2) or
+`notebooks/show_gold_questions_q3_q4.py` (questions 3–4) in Databricks and click
+**Run all**.
 
-`tests/test_config.py::test_no_hardcoded_names_outside_the_config_module` greps
-the package and fails if anyone slips one in.
+## No hardcoded names
 
-Schemas are `<schema_prefix>_bronze`, `_silver` and `_gold`; with the defaults
-that resolves to `workspace.tpch_procurement_bronze.supplier` and friends.
+The code never writes table or schema names directly. They all come from
+`conf/config.yaml`, and you can change them with command-line flags or `TPCH_*`
+environment variables. This way the same code can run in another workspace, or on
+pre-production data. A test checks that nobody added a fixed name by mistake.
 
-## Layer contracts
+## The three layers
 
-**Bronze** — one table per source table, same name, same columns, same types,
-nothing cast or filtered, plus `_ingested_at` and `_source` (the full source
-table name, e.g. `samples.tpch.supplier`). It exists to answer *what arrived,
-from where, and when* — the question that becomes unanswerable once data is
-cleaned on the way in.
+**Bronze** is an exact copy of the source tables. We change nothing. We only add two
+columns: when the data arrived (`_ingested_at`) and where it came from (`_source`).
 
-**Silver** — 3NF, typed, deduplicated, rules enforced. The eight tables stay at
-the original grain and keep their TPC-H column names. Rows that fail a rule go
-to `quarantine_<table>` with `_failed_rules` attached rather than being dropped,
-so rejected rows stay recoverable and bronze = silver + quarantine.
+**Silver** has the same 8 tables, cleaned and checked. Rows that break a rule are not
+deleted. They go to a `quarantine_<table>` table with the reason written next to them,
+so nothing gets lost and every row can be explained.
 
-A key is only referenceable once it has landed in silver. A nation that failed
-its region check cannot be used by a supplier. The diagram is
-[`docs/silver_er.svg`](docs/silver_er.svg).
+**Gold** has tables built for the Procurement questions:
 
-Primary and foreign keys are declared on Delta. Databricks does not enforce
-those constraints, so each rule below is an anti-join (or, for the price, a
-predicate). A predicate that comes back NULL counts as a failure.
-
-- **Line item → partsupp.** Anti-join on `(l_partkey, l_suppkey)` =
-  `(ps_partkey, ps_suppkey)` together. Either column on its own is not the key.
-- **Supplier → nation → region.** `s_nationkey` must exist in `nation`, and
-  `n_regionkey` must exist in `region`.
-- **Supply cost.** `0 < ps_supplycost <= p_retailprice` of that part. A missing
-  part fails the rule, because the comparison cannot be shown.
-
-The other foreign keys of the model — customer to nation, partsupp to part and
-to supplier, orders to customer, lineitem to orders — are enforced the same way.
-
-**Gold** — marts shaped by the Procurement questions. Reads silver only.
-
-### Gold tables and Questions 1–2
-
-The `gold` entry point builds six tables in the configured gold schema.
-Each run replaces these aggregates, even if the ingestion write mode is `append`,
-so reruns do not duplicate business totals. Bronze and silver are only read.
-
-| table | grain | use |
+| Table | One row per | Used for |
 |---|---|---|
-| `supplier_inventory` | one supplier | stock value, deterministic rank, share of all inventory, supplier comments and geography |
-| `supplier_spend_monthly` | one active supplier per calendar month | spend, quantity, line/order counts, supplier comments and geography |
-| `part_supplier_activity` | one available part–supplier pair | listed cost and stock, order activity, brand and supplier geography; all brands, including unused alternatives |
-| `brand32_sourcing` | one Brand#32 part with supplier offers | minimum/maximum cost, gaps, cheapest supplier keys, quantities and sourcing classification |
-| `part_sourcing` | one part with at least one supply agreement | suppliers available vs ordered from, sourcing status, sole supplier and its geography, spend |
-| `supplier_complaints` | one supplier | complaint flag from `s_comment`, all-time spend and share of total spend, geography |
+| `supplier_inventory` | supplier | Q1 |
+| `brand32_sourcing` | Brand#32 part | Q2 |
+| `part_sourcing` | part | Q3 |
+| `supplier_complaints` | supplier | Q4 |
+| `supplier_spend_monthly` | supplier and month | Q4, dashboard |
+| `part_supplier_activity` | part and supplier pair | helper for Q2 and Q3 |
+| `monitor_*` | month | monitoring |
 
-**Q1:** read the first ten ranks from `supplier_inventory`; sum their inventory
-values and divide by the inventory value across **all** suppliers. Suppliers with
-no supply agreements remain in the table with zero inventory. Equal values are
-ordered by supplier key, so the result contains at most ten suppliers consistently.
-Inventory is aggregated before considering any orders; repeated orders cannot
-multiply available stock.
+## How we check the data
 
-**Q2:** compare every listed supplier for each Brand#32 part, then compare their
-offers with actual line-item usage. All suppliers tied for the minimum price count
-as cheapest. The table distinguishes `CHEAPEST_ONLY`, `MIXED`, `OTHER_ONLY` and
-`NOT_ORDERED`. Unordered parts retain their price comparison, but have NULL usage
-flags and NULL quantity share rather than being counted as poor sourcing choices.
-This comparison covers all available order dates.
+All the checks are in `silver.py`, and `notebooks/show_silver_validation.py` shows
+the results.
 
-After the pipeline finishes, open `notebooks/show_gold_questions.py` in the
-Databricks Git folder, attach a cluster, and run all. Match its `load_config`
-overrides to the job's catalog/environment/schema prefix. The notebook only reads
-gold and uses the cluster's Matplotlib to render:
+- **Every order line must match a real supply deal.** A part and a supplier are linked
+  by two columns together, `(partkey, suppkey)`. We do a `LEFT ANTI JOIN` against
+  `partsupp` on both columns. Any line that finds no match goes to quarantine.
+  Checking only one of the columns would not be enough.
+- **Every supplier must have a real nation, and every nation a real region.** This is
+  the same kind of join.
+- **Supply cost must be above 0 and not higher than the part's retail price.**
+- If a check can't give an answer (for example, because of a missing value), we count
+  it as failed, so no row can quietly disappear.
 
-- Q1: the top-ten inventory bar chart and their combined share.
-- Q2: cheapest/most-expensive costs for the 15 largest gaps, sourcing categories,
-  and ordered quantities from cheapest versus other suppliers.
+Databricks lets us declare primary and foreign keys, but it doesn't actually enforce
+them. We still declare them for documentation. The joins above are what really
+protect the data.
 
-The notebook also displays the complete comparison table and an overall summary.
-It collects only the small chart inputs on the driver.
+## How we count things
 
-Monitoring reads silver directly. Gold uses the same spend and period
-definitions, so the two agree.
+- **Spend** is what we pay a supplier: `supply cost × quantity`. We do not use the
+  price the customer paid, because that is our income, not our cost.
+- **Inventory value** is `available quantity × supply cost`, added up per supplier.
+- **A single-sourced part** is a part we only ever bought from one supplier, even
+  though other suppliers also offer it.
+- **A supplier with complaints** has `Customer ... Complaints` in its comment text.
+  TPC-H writes complaints in exactly this form.
+- **Average supply cost by region** is total spend divided by total quantity. A plain
+  average of prices would ignore how much we actually bought.
+- **The alert** goes off if one supplier gets more than 5% of a month's spend.
 
-### Questions 3–4
+## Results
 
-**Q3:** `part_sourcing` rolls `part_supplier_activity` up to one row per part. A
-part is single-sourced (`SINGLE_WITH_ALTERNATIVES`) when exactly one supplier was
-ordered from and `partsupp` lists at least one other. Parts with only one listed
-supplier (`SINGLE_NO_ALTERNATIVE`) are counted separately, because there was no
-choice. Parts never ordered (`NOT_ORDERED`) are not single-sourced. The sole
-supplier's key, nation and region are filled only when there is exactly one, so
-the risk can be grouped by geography, brand or supplier. A grouping counts as a
-concentration only when its share of single-sourced parts is clearly above its
-share of all spend. The notebook shows the two shares side by side.
+These come from a full run on 2026-10-07. The data has 50,000 suppliers, 1 million
+parts and about 30 million order lines.
 
-**Q4:** a supplier has a complaint when `s_comment LIKE '%Customer%Complaints%'`.
-That is how the TPC-H generator plants complaints, and the spec's own Query 16
-filters on the same pattern. The match is case-sensitive. The notebook profiles
-looser alternatives (any case, the word on its own) and shows what they would
-add. A NULL comment counts as no complaint, so the two groups always add up to
-all spend. The answer is the complaint suppliers' spend divided by total spend.
-The notebook compares it with their share of the supplier count, and plots the
-monthly share from `supplier_spend_monthly`.
+**Data checks.** Every table adds up: bronze = silver + quarantine. We found one real
+problem in the source data. 3,479 supply deals have a supply cost higher than the
+retail price. For example, part 1 from supplier 12502 costs 993.49, but the part sells
+for 901.00. These deals went to quarantine, and so did the 26,433 order lines that
+used them.
 
-Open `notebooks/show_gold_questions_q3_q4.py` the same way as the Q1/Q2
-notebook. It only reads gold, plus silver `supplier` for the pattern profiling.
+**Q1. Which 10 suppliers have the biggest inventory value?** Together they hold
+0.0276% of all inventory value. That is very close to an even split, so stock is
+spread out and no supplier stands out. The biggest is Supplier#000037953 from
+Mozambique, with 282.1 million.
 
-### Dashboard
+**Q2. How much do supply costs differ for Brand#32 parts, and do we buy from the
+cheapest supplier?** For the same part, the cheapest and the most expensive supplier
+differ by 598.97 per unit on average, and by up to 996.02. Only 24.97% of what we
+bought came from the cheapest supplier. That is about what you would get by picking
+one of four suppliers at random, so price is not driving our choice.
 
-`dashboards/procurement.lvdash.json` has four pages: an overview with headline
-counters, Q1–Q2, Q3–Q4, and monitoring (top-10 spend concentration, supply cost
-by region, largest single-supplier share against the 5% alert line). Every
-dataset query reads gold only. `tests/test_gold.py` runs each query on a local
-Spark and checks that every widget's fields exist. Edit the dashboard in the UI
-if you like, then export it back over this file so git stays the source of truth.
+**Q3. Which parts do we buy from only one supplier when others are available?** None.
+Every part was bought from several suppliers. There are 10 parts with just one
+supplier, but only because their other supply deals were quarantined in silver. So
+there is no risk here, and nothing is concentrated in one region or brand.
 
-## Metric definitions
+**Q4. Which suppliers have complaints, and how much do we spend with them?** 26 of
+50,000 suppliers have complaints. They get 0.053% of our spend, which is about their
+fair share. So complaints don't change how much we buy from a supplier. This share
+stays steady from month to month.
 
-Every headline number is defined once here, and every query in the repo uses
-that definition. If a gold answer and a monitoring chart disagree, one of them
-stopped following this section.
-
-**Inventory value** — `sum(ps_availqty * ps_supplycost)` per supplier, a snapshot
-of available stock. It has no order-date dimension. Q1's combined top-ten share
-is the sum for the ten ranked suppliers divided by the total for all suppliers.
-
-**Brand#32 supply-cost gap** — maximum minus minimum listed supply cost for the
-same part. The relative gap is `(maximum - minimum) / minimum`; multiply by 100
-to display a percentage. Compare prices within a part, not across different parts.
-
-**Cheapest-supplier usage** — `orders_from_cheapest` means at least one line uses
-a supplier at the minimum listed cost; `orders_only_from_cheapest` means every
-line does. All tied suppliers qualify. Quantity share is units sourced from
-cheapest suppliers divided by all ordered units for that part. Overall quantity
-share uses summed quantities, not the average of per-part shares. Shares are
-stored as fractions; unordered parts have NULL shares.
-
-**Spend** — what we pay a supplier:
-
-```
-spend = ps_supplycost * l_quantity
-```
-
-Not `l_extendedprice`. That is what a customer pays *us*, which is a Finance
-number; Procurement is asked what the company pays out. A line item resolves to
-its supply agreement on **both** keys together, `(l_partkey, l_suppkey)` —
-joining on the part alone multiplies spend by the number of suppliers offering
-that part.
-
-Supply costs in `partsupp` have no historical effective dates. Spend therefore
-uses the listed cost for each ordered quantity; it does not reconstruct supplier
-invoices or historical prices. Q2 price gaps describe listed alternatives, without
-assuming identical capacity, service, or delivery terms.
-
-**Period** — calendar month of `o_orderdate`. `partsupp` carries no date of its
-own, so every time series is anchored to when the goods were actually ordered.
-
-**Spend concentration** — within one month, the share of total spend held by the
-ten largest suppliers. Rising concentration is rising single-supplier risk.
-
-**Average supply cost by region** — spend-weighted, per unit:
-
-```
-sum(ps_supplycost * l_quantity) / sum(l_quantity)
-```
-
-Deliberately not `avg(ps_supplycost)`. That averages a price list rather than
-real purchases, and averaging those averages across regions produces a number
-with no meaning — the non-additive-measure trap.
-
-**Single-sourced part** — a part ordered from exactly one supplier, over all
-order dates, although `partsupp` lists more than one supplier for it.
-
-**Complaint supplier** — `s_comment LIKE '%Customer%Complaints%'`
-(`gold.COMPLAINT_PATTERN`). Its spend share is its spend divided by total spend
-across all suppliers and all order dates.
-
-**Single-supplier alert** — fires when one supplier holds more than **5%** of a
-month's spend. The threshold is a choice, not a derivation: at 10k suppliers an
-even split gives each 0.01%, so 5% means one supplier is carrying five hundred
-times its share and is worth a human look. Tune it in
-`monitoring.SINGLE_SUPPLIER_SHARE_THRESHOLD`.
-
-## Status
-
-| | owner | state |
-|---|---|---|
-| repo, config, job | person 1 | done |
-| bronze | person 1 | done |
-| silver | person 2 | done |
-| gold + Q1/Q2 code and visualisations | person 3 | implemented |
-| monitoring + alert | person 1 | done |
-| gold Q3/Q4, visualisations, dashboard | person 4 | implemented |
+**Monitoring.** We have 80 months of data, from January 1992 to August 1998. No single
+supplier ever got more than 0.033% of a month's spend, so the 5% alert never went off.
+The supply cost per unit is about 500 in every region.
 
 ## Presentation
 
