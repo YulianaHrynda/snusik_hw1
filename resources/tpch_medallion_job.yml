@@ -28,7 +28,7 @@ resources:
         - task_key: bronze
           environment_key: pipeline
           python_wheel_task:
-            package_name: tpch_lakehouse
+            package_name: tpch_procurement
             entry_point: bronze
             parameters: &layer_params
               - "--env={{job.parameters.env}}"
@@ -42,7 +42,7 @@ resources:
             - task_key: bronze
           environment_key: pipeline
           python_wheel_task:
-            package_name: tpch_lakehouse
+            package_name: tpch_procurement
             entry_point: silver
             parameters: *layer_params
 
@@ -51,7 +51,7 @@ resources:
             - task_key: silver
           environment_key: pipeline
           python_wheel_task:
-            package_name: tpch_lakehouse
+            package_name: tpch_procurement
             entry_point: gold
             parameters: *layer_params
 
@@ -60,6 +60,6 @@ resources:
             - task_key: gold
           environment_key: pipeline
           python_wheel_task:
-            package_name: tpch_lakehouse
+            package_name: tpch_procurement
             entry_point: monitoring
             parameters: *layer_params
