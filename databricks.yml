@@ -33,6 +33,10 @@ variables:
   source_schema:
     description: Schema holding the raw TPC-H tables
     default: tpch
+  warehouse_id:
+    description: SQL warehouse the dashboard runs on; override with --var warehouse_id=<id>
+    lookup:
+      warehouse: Serverless Starter Warehouse
 
 targets:
   dev:

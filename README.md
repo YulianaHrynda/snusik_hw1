@@ -16,15 +16,17 @@ src/tpch_lakehouse/
   session.py                SparkSession, on a cluster or locally
   bronze.py                 capture the source as is          (person 1)
   silver.py                 3NF + enforced data quality       (person 2)
-  gold.py                   procurement marts                 (person 3)
+  gold.py                   procurement marts                 (persons 3, 4)
   monitoring.py             metrics over time + alert         (person 1)
 notebooks/run_bronze.py     run bronze from a Databricks Git folder
 notebooks/show_silver_validation.py   silver checks, for the demo
 notebooks/show_gold_questions.py     Q1/Q2 answers and charts (person 3)
+notebooks/show_gold_questions_q3_q4.py  Q3/Q4 answers and charts (person 4)
+dashboards/procurement.lvdash.json   Databricks dashboard, all questions + monitoring (person 4)
 docs/silver_er.svg          ER diagram of the silver tables
 databricks.yml              asset bundle
-resources/                  the job: bronze -> silver -> gold -> monitoring
-tests/                      config tests, runnable without a cluster
+resources/                  the job: bronze -> silver -> gold -> monitoring, and the dashboard
+tests/                      config, silver and gold tests, runnable without a cluster
 data/                       lecture walkthroughs, reference only
 ```
 
@@ -55,6 +57,13 @@ databricks bundle validate -t dev
 databricks bundle deploy   -t dev
 databricks bundle run tpch_medallion -t dev
 ```
+
+The deploy also publishes the **Procurement dashboard**. It runs on the SQL
+warehouse named `Serverless Starter Warehouse`. On a workspace without one, pass
+`--var warehouse_id=<id>` to `validate` and `deploy`. Its queries name gold tables
+without a catalog or schema. The bundle sets `dataset_catalog` and
+`dataset_schema` to the target's gold schema, so the same JSON serves dev and
+preprod. Run the job at least once before opening the dashboard.
 
 ## Nothing is hardcoded
 
@@ -110,7 +119,7 @@ to supplier, orders to customer, lineitem to orders — are enforced the same wa
 
 ### Gold tables and Questions 1–2
 
-The existing `gold` entry point builds four tables in the configured gold schema.
+The `gold` entry point builds six tables in the configured gold schema.
 Each run replaces these aggregates, even if the ingestion write mode is `append`,
 so reruns do not duplicate business totals. Bronze and silver are only read.
 
@@ -120,6 +129,8 @@ so reruns do not duplicate business totals. Bronze and silver are only read.
 | `supplier_spend_monthly` | one active supplier per calendar month | spend, quantity, line/order counts, supplier comments and geography |
 | `part_supplier_activity` | one available part–supplier pair | listed cost and stock, order activity, brand and supplier geography; all brands, including unused alternatives |
 | `brand32_sourcing` | one Brand#32 part with supplier offers | minimum/maximum cost, gaps, cheapest supplier keys, quantities and sourcing classification |
+| `part_sourcing` | one part with at least one supply agreement | suppliers available vs ordered from, sourcing status, sole supplier and its geography, spend |
+| `supplier_complaints` | one supplier | complaint flag from `s_comment`, all-time spend and share of total spend, geography |
 
 **Q1:** read the first ten ranks from `supplier_inventory`; sum their inventory
 values and divide by the inventory value across **all** suppliers. Suppliers with
@@ -147,10 +158,41 @@ gold and uses the cluster's Matplotlib to render:
 The notebook also displays the complete comparison table and an overall summary.
 It collects only the small chart inputs on the driver.
 
-Person 4 can compare available pairs with pairs having `line_count > 0` using
-`part_supplier_activity` for Q3. Q4 can use supplier comments and summed monthly
-spend from `supplier_spend_monthly`. Monitoring currently reads silver directly;
-gold follows the same spend and period definitions without changing that code.
+Monitoring reads silver directly. Gold uses the same spend and period
+definitions, so the two agree.
+
+### Questions 3–4
+
+**Q3:** `part_sourcing` rolls `part_supplier_activity` up to one row per part. A
+part is single-sourced (`SINGLE_WITH_ALTERNATIVES`) when exactly one supplier was
+ordered from and `partsupp` lists at least one other. Parts with only one listed
+supplier (`SINGLE_NO_ALTERNATIVE`) are counted separately, because there was no
+choice. Parts never ordered (`NOT_ORDERED`) are not single-sourced. The sole
+supplier's key, nation and region are filled only when there is exactly one, so
+the risk can be grouped by geography, brand or supplier. A grouping counts as a
+concentration only when its share of single-sourced parts is clearly above its
+share of all spend. The notebook shows the two shares side by side.
+
+**Q4:** a supplier has a complaint when `s_comment LIKE '%Customer%Complaints%'`.
+That is how the TPC-H generator plants complaints, and the spec's own Query 16
+filters on the same pattern. The match is case-sensitive. The notebook profiles
+looser alternatives (any case, the word on its own) and shows what they would
+add. A NULL comment counts as no complaint, so the two groups always add up to
+all spend. The answer is the complaint suppliers' spend divided by total spend.
+The notebook compares it with their share of the supplier count, and plots the
+monthly share from `supplier_spend_monthly`.
+
+Open `notebooks/show_gold_questions_q3_q4.py` the same way as the Q1/Q2
+notebook. It only reads gold, plus silver `supplier` for the pattern profiling.
+
+### Dashboard
+
+`dashboards/procurement.lvdash.json` has four pages: an overview with headline
+counters, Q1–Q2, Q3–Q4, and monitoring (top-10 spend concentration, supply cost
+by region, largest single-supplier share against the 5% alert line). Every
+dataset query reads gold only. `tests/test_gold.py` runs each query on a local
+Spark and checks that every widget's fields exist. Edit the dashboard in the UI
+if you like, then export it back over this file so git stays the source of truth.
 
 ## Metric definitions
 
@@ -206,6 +248,13 @@ Deliberately not `avg(ps_supplycost)`. That averages a price list rather than
 real purchases, and averaging those averages across regions produces a number
 with no meaning — the non-additive-measure trap.
 
+**Single-sourced part** — a part ordered from exactly one supplier, over all
+order dates, although `partsupp` lists more than one supplier for it.
+
+**Complaint supplier** — `s_comment LIKE '%Customer%Complaints%'`
+(`gold.COMPLAINT_PATTERN`). Its spend share is its spend divided by total spend
+across all suppliers and all order dates.
+
 **Single-supplier alert** — fires when one supplier holds more than **5%** of a
 month's spend. The threshold is a choice, not a derivation: at 10k suppliers an
 even split gives each 0.01%, so 5% means one supplier is carrying five hundred
@@ -221,6 +270,7 @@ times its share and is worth a human look. Tune it in
 | silver | person 2 | done |
 | gold + Q1/Q2 code and visualisations | person 3 | implemented |
 | monitoring + alert | person 1 | done |
+| gold Q3/Q4, visualisations, dashboard | person 4 | implemented |
 
 ## Presentation
 
