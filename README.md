@@ -65,6 +65,16 @@ without a catalog or schema. The bundle sets `dataset_catalog` and
 `dataset_schema` to the target's gold schema, so the same JSON serves dev and
 preprod. Run the job at least once before opening the dashboard.
 
+In a shared workspace the schemas belong to whoever created them first. To run
+your own copy, give the deploy and the run a personal prefix:
+
+```bash
+databricks bundle deploy -t dev --var schema_prefix=tpch_procurement_<you>
+databricks bundle run tpch_medallion -t dev --var schema_prefix=tpch_procurement_<you>
+```
+
+The job runs on serverless compute, so it works on Databricks Free Edition.
+
 ## Nothing is hardcoded
 
 The assignment asks for scripts that port to another workspace, assuming access
@@ -261,6 +271,83 @@ even split gives each 0.01%, so 5% means one supplier is carrying five hundred
 times its share and is worth a human look. Tune it in
 `monitoring.SINGLE_SUPPLIER_SHARE_THRESHOLD`.
 
+## Results
+
+From a full run on `samples.tpch` (50,000 suppliers, 1,000,000 parts, 30M line
+items) on 2026-10-07, in the `tpch_procurement_hrynda_*` schemas. Money is in the
+dataset's currency units.
+
+### Validation
+
+Every layer reconciles: bronze = silver + quarantine for all eight tables.
+
+| table | bronze | silver | quarantined | rule |
+|---|---:|---:|---:|---|
+| partsupp | 4,000,000 | 3,996,521 | 3,479 | `supplycost_within_retail` |
+| lineitem | 29,999,795 | 29,973,362 | 26,433 | `fk_lineitem_partsupp` |
+| other six tables | | | 0 | |
+
+The source itself contains 3,479 supply agreements whose supply cost is above
+the part's retail price. For example, part 1 from supplier 12502 costs 993.49,
+while the part retails at 901.00. The profile's rule rejects them. The 26,433
+line items bought under those agreements then fail the two-column foreign key,
+because their `(partkey, suppkey)` pair is no longer in silver. All answers
+below exclude both.
+
+### Q1. Ten largest inventories
+
+The top ten suppliers hold **2,756,133,313.28** of **9,996,460,036,124.43**
+inventory value, which is **0.0276%**. An even split across 50,000 suppliers would
+give ten of them 0.02%, so inventory is spread almost evenly. The largest
+inventory is Supplier#000037953 (Mozambique), at 282.1M.
+
+### Q2. Brand#32 supply-cost spread
+
+- **Spread:** across 39,792 Brand#32 parts with about four offers each, the
+  cheapest and most expensive supplier differ by **598.97** per unit on average,
+  and by at most **996.02**.
+- **Do we order from the cheapest supplier?** Mostly not. 39,778 parts were
+  ordered from a cheapest supplier at least once, 14 never were, and no part was
+  ordered only from the cheapest.
+- **By quantity:** **24.97%** of units were bought at the cheapest price. That is
+  what choosing one of four suppliers at random would give, so price does not
+  drive which supplier is used.
+
+### Q3. Single-sourced parts
+
+**None.** No part was ordered from a single supplier while `partsupp` listed
+others.
+
+- 999,989 parts were ordered from more than one supplier.
+- Each part has at least 3 order lines, and 30 at the median, spread across its
+  suppliers.
+- 10 parts were ordered from one supplier, but no other supplier offers them.
+  That is only because their other agreements were quarantined for supply cost
+  above retail.
+
+So there is no single-sourcing risk, and no concentration to report by region,
+brand or supplier.
+
+### Q4. Suppliers with complaints
+
+- **Who:** **26** of 50,000 suppliers (**0.052%**) match
+  `'%Customer%Complaints%'`. Looser patterns find the same 26 (the word
+  "Complaints" alone, or "complain" in any case).
+- **By region:** Europe 9, America 7, Asia 6, Middle East 3, Africa 1.
+- **Spend:** **202,525,529.79** of **382,304,884,533.07**, which is **0.0530%** of
+  all spend. That is 1.02 times their share of the supplier count, so we buy
+  from them about as much as from anyone else; complaints do not reduce spend.
+- **Over time:** the monthly share stays between 0.044% and 0.067%.
+
+### Monitoring
+
+- **Coverage:** 80 months, from 1992-01 to 1998-08.
+- **Concentration:** the top ten suppliers hold between 0.065% and 0.298% of a
+  month's spend.
+- **Alert:** the largest single-supplier share in any month is 0.033%, far below
+  the 5% threshold, so it never fires.
+- **Supply cost per unit:** between 499.83 and 500.39 in every region.
+
 ## Status
 
 | | owner | state |
@@ -270,7 +357,7 @@ times its share and is worth a human look. Tune it in
 | silver | person 2 | done |
 | gold + Q1/Q2 code and visualisations | person 3 | implemented |
 | monitoring + alert | person 1 | done |
-| gold Q3/Q4, visualisations, dashboard | person 4 | implemented |
+| gold Q3/Q4, visualisations, dashboard | person 4 | done |
 
 ## Presentation
 
