@@ -17,18 +17,16 @@ resources:
         - name: source_schema
           default: ${var.source_schema}
 
-      job_clusters:
-        - job_cluster_key: pipeline
-          new_cluster:
-            # Adjust to whatever your workspace actually offers before deploying.
-            spark_version: 15.4.x-scala2.12
-            node_type_id: Standard_DS3_v2
-            num_workers: 1
-            data_security_mode: SINGLE_USER
+      environments:
+        - environment_key: pipeline
+          spec:
+            environment_version: "2"
+            dependencies:
+              - ../dist/*.whl
 
       tasks:
         - task_key: bronze
-          job_cluster_key: pipeline
+          environment_key: pipeline
           python_wheel_task:
             package_name: tpch_lakehouse
             entry_point: bronze
@@ -38,38 +36,30 @@ resources:
               - "--schema-prefix={{job.parameters.schema_prefix}}"
               - "--source-catalog={{job.parameters.source_catalog}}"
               - "--source-schema={{job.parameters.source_schema}}"
-          libraries:
-            - whl: ../dist/*.whl
 
         - task_key: silver
           depends_on:
             - task_key: bronze
-          job_cluster_key: pipeline
+          environment_key: pipeline
           python_wheel_task:
             package_name: tpch_lakehouse
             entry_point: silver
             parameters: *layer_params
-          libraries:
-            - whl: ../dist/*.whl
 
         - task_key: gold
           depends_on:
             - task_key: silver
-          job_cluster_key: pipeline
+          environment_key: pipeline
           python_wheel_task:
             package_name: tpch_lakehouse
             entry_point: gold
             parameters: *layer_params
-          libraries:
-            - whl: ../dist/*.whl
 
         - task_key: monitoring
           depends_on:
             - task_key: gold
-          job_cluster_key: pipeline
+          environment_key: pipeline
           python_wheel_task:
             package_name: tpch_lakehouse
             entry_point: monitoring
             parameters: *layer_params
-          libraries:
-            - whl: ../dist/*.whl
