@@ -529,30 +529,22 @@ def run(spark: Any, config: Config) -> None:
 
     config.create_schemas(spark)
     parents: dict[str, DataFrame] = {}
-    cached: list[DataFrame] = []
-    try:
-        for name in config.tables:
-            spec = SPECS[name]
-            good, bad = conform(_read_bronze(spark, config, spec), spec, parents)
-            good = good.cache()
-            bad = bad.cache()
-            cached.extend((good, bad))
-            _write(good, config, spec.name)
-            _write(bad, config, quarantine_table(spec.name))
-            log.info(
-                "%-10s %10d kept %10d quarantined -> %s",
-                spec.name,
-                good.count(),
-                bad.count(),
-                config.table(LAYER, spec.name),
-            )
-            parents[name] = good
-        declare_keys(spark, config)
-        for rule, count in headline_results(spark, config):
-            log.info("check %-28s %d quarantined", rule, count)
-    finally:
-        for frame in cached:
-            frame.unpersist()
+    for name in config.tables:
+        spec = SPECS[name]
+        good, bad = conform(_read_bronze(spark, config, spec), spec, parents)
+        _write(good, config, spec.name)
+        _write(bad, config, quarantine_table(spec.name))
+        log.info(
+            "%-10s %10d kept %10d quarantined -> %s",
+            spec.name,
+            spark.table(config.table(LAYER, spec.name)).count(),
+            spark.table(config.table(LAYER, quarantine_table(spec.name))).count(),
+            config.table(LAYER, spec.name),
+        )
+        parents[name] = good
+    declare_keys(spark, config)
+    for rule, count in headline_results(spark, config):
+        log.info("check %-28s %d quarantined", rule, count)
 
 
 def main() -> None:
