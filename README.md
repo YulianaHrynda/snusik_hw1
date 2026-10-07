@@ -20,6 +20,7 @@ src/tpch_lakehouse/
   monitoring.py             metrics over time + alert         (person 1)
 notebooks/run_bronze.py     run bronze from a Databricks Git folder
 notebooks/show_silver_validation.py   silver checks, for the demo
+notebooks/show_gold_questions.py     Q1/Q2 answers and charts (person 3)
 docs/silver_er.svg          ER diagram of the silver tables
 databricks.yml              asset bundle
 resources/                  the job: bronze -> silver -> gold -> monitoring
@@ -107,11 +108,70 @@ to supplier, orders to customer, lineitem to orders — are enforced the same wa
 
 **Gold** — marts shaped by the Procurement questions. Reads silver only.
 
+### Gold tables and Questions 1–2
+
+The existing `gold` entry point builds four tables in the configured gold schema.
+Each run replaces these aggregates, even if the ingestion write mode is `append`,
+so reruns do not duplicate business totals. Bronze and silver are only read.
+
+| table | grain | use |
+|---|---|---|
+| `supplier_inventory` | one supplier | stock value, deterministic rank, share of all inventory, supplier comments and geography |
+| `supplier_spend_monthly` | one active supplier per calendar month | spend, quantity, line/order counts, supplier comments and geography |
+| `part_supplier_activity` | one available part–supplier pair | listed cost and stock, order activity, brand and supplier geography; all brands, including unused alternatives |
+| `brand32_sourcing` | one Brand#32 part with supplier offers | minimum/maximum cost, gaps, cheapest supplier keys, quantities and sourcing classification |
+
+**Q1:** read the first ten ranks from `supplier_inventory`; sum their inventory
+values and divide by the inventory value across **all** suppliers. Suppliers with
+no supply agreements remain in the table with zero inventory. Equal values are
+ordered by supplier key, so the result contains at most ten suppliers consistently.
+Inventory is aggregated before considering any orders; repeated orders cannot
+multiply available stock.
+
+**Q2:** compare every listed supplier for each Brand#32 part, then compare their
+offers with actual line-item usage. All suppliers tied for the minimum price count
+as cheapest. The table distinguishes `CHEAPEST_ONLY`, `MIXED`, `OTHER_ONLY` and
+`NOT_ORDERED`. Unordered parts retain their price comparison, but have NULL usage
+flags and NULL quantity share rather than being counted as poor sourcing choices.
+This comparison covers all available order dates.
+
+After the pipeline finishes, open `notebooks/show_gold_questions.py` in the
+Databricks Git folder, attach a cluster, and run all. Match its `load_config`
+overrides to the job's catalog/environment/schema prefix. The notebook only reads
+gold and uses the cluster's Matplotlib to render:
+
+- Q1: the top-ten inventory bar chart and their combined share.
+- Q2: cheapest/most-expensive costs for the 15 largest gaps, sourcing categories,
+  and ordered quantities from cheapest versus other suppliers.
+
+The notebook also displays the complete comparison table and an overall summary.
+It collects only the small chart inputs on the driver.
+
+Person 4 can compare available pairs with pairs having `line_count > 0` using
+`part_supplier_activity` for Q3. Q4 can use supplier comments and summed monthly
+spend from `supplier_spend_monthly`. Monitoring currently reads silver directly;
+gold follows the same spend and period definitions without changing that code.
+
 ## Metric definitions
 
 Every headline number is defined once here, and every query in the repo uses
 that definition. If a gold answer and a monitoring chart disagree, one of them
 stopped following this section.
+
+**Inventory value** — `sum(ps_availqty * ps_supplycost)` per supplier, a snapshot
+of available stock. It has no order-date dimension. Q1's combined top-ten share
+is the sum for the ten ranked suppliers divided by the total for all suppliers.
+
+**Brand#32 supply-cost gap** — maximum minus minimum listed supply cost for the
+same part. The relative gap is `(maximum - minimum) / minimum`; multiply by 100
+to display a percentage. Compare prices within a part, not across different parts.
+
+**Cheapest-supplier usage** — `orders_from_cheapest` means at least one line uses
+a supplier at the minimum listed cost; `orders_only_from_cheapest` means every
+line does. All tied suppliers qualify. Quantity share is units sourced from
+cheapest suppliers divided by all ordered units for that part. Overall quantity
+share uses summed quantities, not the average of per-part shares. Shares are
+stored as fractions; unordered parts have NULL shares.
 
 **Spend** — what we pay a supplier:
 
@@ -124,6 +184,11 @@ number; Procurement is asked what the company pays out. A line item resolves to
 its supply agreement on **both** keys together, `(l_partkey, l_suppkey)` —
 joining on the part alone multiplies spend by the number of suppliers offering
 that part.
+
+Supply costs in `partsupp` have no historical effective dates. Spend therefore
+uses the listed cost for each ordered quantity; it does not reconstruct supplier
+invoices or historical prices. Q2 price gaps describe listed alternatives, without
+assuming identical capacity, service, or delivery terms.
 
 **Period** — calendar month of `o_orderdate`. `partsupp` carries no date of its
 own, so every time series is anchored to when the goods were actually ordered.
@@ -154,7 +219,7 @@ times its share and is worth a human look. Tune it in
 | repo, config, job | person 1 | done |
 | bronze | person 1 | done |
 | silver | person 2 | done |
-| gold | person 3 | not started |
+| gold + Q1/Q2 code and visualisations | person 3 | implemented |
 | monitoring + alert | person 1 | done |
 
 ## Presentation
