@@ -167,4 +167,4 @@ The supply cost per unit is about 500 in every region.
 
 ## Presentation
 
-*(link goes here)*
+https://canva.link/p7ke2gacgihghoo
